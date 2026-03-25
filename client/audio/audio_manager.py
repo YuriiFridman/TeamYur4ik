@@ -41,8 +41,8 @@ class AudioManager:
     """
 
     def __init__(self):
-        # PyAudio instance (None if unavailable)
-        self._pa: Optional["pyaudio.PyAudio"] = None
+        # PyAudio instance (None if unavailable or import failed)
+        self._pa: Optional[object] = None
         # Device indices (None = let PyAudio pick the system default)
         self._input_device_index: Optional[int] = None
         self._output_device_index: Optional[int] = None

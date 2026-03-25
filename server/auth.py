@@ -17,8 +17,8 @@ def create_token(user_id: int, username: str) -> str:
     payload = {
         "user_id": user_id,
         "username": username,
-        # Token expires after JWT_EXPIRY_HOURS hours from now
-        "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=config.JWT_EXPIRY_HOURS)
+        # Token expires after JWT_EXPIRY_HOURS hours from now (timezone-aware)
+        "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=config.JWT_EXPIRY_HOURS)
     }
     return jwt.encode(payload, config.SECRET_KEY, algorithm=config.JWT_ALGORITHM)
 
