@@ -324,14 +324,12 @@ def delete_server(server_id: int):
         with get_connection() as conn:
             conn.execute("DELETE FROM server_members WHERE server_id = ?", (server_id,))
             conn.execute("DELETE FROM bans WHERE server_id = ?", (server_id,))
-            # Delete all messages in every channel of this server
-            channel_ids = [
-                r[0] for r in conn.execute(
-                    "SELECT id FROM channels WHERE server_id = ?", (server_id,)
-                ).fetchall()
-            ]
-            for ch_id in channel_ids:
-                conn.execute("DELETE FROM messages WHERE channel_id = ?", (ch_id,))
+            # Delete all messages in every channel of this server using a single subquery
+            conn.execute(
+                "DELETE FROM messages WHERE channel_id IN "
+                "(SELECT id FROM channels WHERE server_id = ?)",
+                (server_id,),
+            )
             conn.execute("DELETE FROM channels WHERE server_id = ?", (server_id,))
             conn.execute("DELETE FROM servers WHERE id = ?", (server_id,))
             conn.commit()

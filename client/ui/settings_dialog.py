@@ -202,7 +202,9 @@ class SettingsDialog(QDialog):
     def keyPressEvent(self, event):
         """Intercept key presses; when in capture mode, record the PTT key."""
         if self._capturing_ptt:
-            key_name = event.text() or str(event.key())
+            from PyQt6.QtGui import QKeySequence
+            # Use QKeySequence for a human-readable name (handles F-keys, modifiers, etc.)
+            key_name = QKeySequence(event.key()).toString() or event.text() or str(event.key())
             self._ptt_btn.setText(key_name)
             if self._audio_manager:
                 self._audio_manager.set_ptt_key(key_name)

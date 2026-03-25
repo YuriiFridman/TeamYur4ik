@@ -62,6 +62,11 @@ class AudioManager:
         # Callback invoked with encoded audio bytes when a frame should be transmitted
         self.on_audio_captured: Optional[Callable[[bytes], None]] = None
 
+        # Persistent output stream – opened once and reused to avoid the
+        # per-frame open/close overhead that causes audio glitches and high CPU usage.
+        self._output_stream: Optional[object] = None
+        self._output_lock = threading.Lock()
+
         # Opus encoder/decoder handles (None if opuslib unavailable)
         self._encoder = None
         self._decoder = None
@@ -175,28 +180,37 @@ class AudioManager:
 
     def play_audio(self, data: bytes):
         """
-        Decode incoming audio bytes and play them through the output device.
-        Opens a short-lived output stream per call (suitable for 20 ms bursts).
+        Decode incoming audio bytes and write them to the persistent output stream.
+        The stream is opened lazily on the first call and reused for all subsequent frames,
+        avoiding the per-frame open/close overhead that caused audio glitches.
         """
         if not self._pa:
             return
         pcm = self._decode(data)
         if not pcm:
             return
-        try:
-            stream = self._pa.open(
-                format=pyaudio.paInt16,
-                channels=CHANNELS,
-                rate=SAMPLE_RATE,
-                output=True,
-                frames_per_buffer=CHUNK_SIZE,
-                output_device_index=self._output_device_index,
-            )
-            stream.write(pcm)
-            stream.stop_stream()
-            stream.close()
-        except Exception as e:
-            logger.error(f"Error playing audio: {e}")
+        with self._output_lock:
+            try:
+                # Open the persistent stream if it is not yet open or was closed
+                if self._output_stream is None or not self._output_stream.is_active():
+                    self._output_stream = self._pa.open(
+                        format=pyaudio.paInt16,
+                        channels=CHANNELS,
+                        rate=SAMPLE_RATE,
+                        output=True,
+                        frames_per_buffer=CHUNK_SIZE,
+                        output_device_index=self._output_device_index,
+                    )
+                self._output_stream.write(pcm)
+            except Exception as e:
+                logger.error(f"Error playing audio: {e}")
+                # Close the broken stream so the next call re-opens it cleanly
+                if self._output_stream:
+                    try:
+                        self._output_stream.close()
+                    except Exception:
+                        pass
+                    self._output_stream = None
 
     # -------------------------------------------------------------------------
     # Encode / decode helpers
@@ -298,8 +312,17 @@ class AudioManager:
         return result
 
     def __del__(self):
-        """Ensure the capture thread and PyAudio are cleaned up on garbage collection."""
+        """Ensure the capture thread, output stream, and PyAudio are cleaned up on GC."""
         self.stop_capture()
+        # Close the persistent output stream if it is still open
+        with self._output_lock:
+            if self._output_stream:
+                try:
+                    self._output_stream.stop_stream()
+                    self._output_stream.close()
+                except Exception:
+                    pass
+                self._output_stream = None
         if self._pa:
             try:
                 self._pa.terminate()

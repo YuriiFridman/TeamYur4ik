@@ -402,20 +402,21 @@ async def handle_client(websocket: WebSocketServerProtocol):
                 data = msg.get("data", {})
 
                 # Actions other than login/register require an authenticated session.
-                # Clients can authenticate per-message via a JWT token in the data dict.
-                if action not in ("login", "register") and not client.user_id:
+                # Validate the JWT token on every request to enforce session expiry.
+                if action not in ("login", "register"):
                     token = data.get("token")
                     if token:
                         token_data = auth.verify_token(token)
                         if token_data:
+                            # Refresh in-memory identity from the token on each request
                             client.user_id = token_data["user_id"]
                             client.username = token_data["username"]
                             connected_clients[client.user_id] = client
                         else:
                             await send_response(websocket, action, False,
-                                                {"error": "Not authenticated"})
+                                                {"error": "Token expired or invalid"})
                             continue
-                    else:
+                    elif not client.user_id:
                         await send_response(websocket, action, False,
                                             {"error": "Not authenticated"})
                         continue
