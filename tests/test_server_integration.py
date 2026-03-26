@@ -5,10 +5,12 @@ We spin up a real asyncio WebSocket server on a random port, connect
 one or more test clients, and assert the responses are correct.
 """
 import asyncio
+import concurrent.futures
 import json
 import os
 import sys
 import threading
+from typing import Optional
 import pytest
 import websockets
 
@@ -26,10 +28,6 @@ pytest_plugins = ("pytest_asyncio",)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-# How long to keep each test's server alive (seconds).
-# Must be longer than the slowest test in this module.
-_TEST_SERVER_KEEPALIVE_SECONDS = 30
 
 def _get_free_port():
     import socket
@@ -86,13 +84,23 @@ def server_url(tmp_path):
     # Run the asyncio server in a background thread
     loop = asyncio.new_event_loop()
     started = threading.Event()
+    # shutdown is assigned in _serve() before started.set(), so by the time
+    # started.wait() returns in the main thread it is guaranteed to be non-None.
+    shutdown: Optional[asyncio.Event] = None
 
     async def _serve():
-        # Start the voice relay on the patched port too
+        nonlocal shutdown
+        shutdown = asyncio.Event()
         await srv.voice_relay.start(_cfg.HOST, _cfg.VOICE_PORT)
-        async with websockets.serve(srv.handle_client, "127.0.0.1", port):
+        async with websockets.serve(srv.handle_client, "127.0.0.1", port) as ws_server:
             started.set()
-            await asyncio.sleep(_TEST_SERVER_KEEPALIVE_SECONDS)  # keep alive for the duration of the test
+            # Wait until teardown signals us to stop.
+            await shutdown.wait()
+            # Close the WebSocket server so no new connections are accepted.
+            ws_server.close()
+            await ws_server.wait_closed()
+        # Stop the UDP voice relay after WebSocket server has closed.
+        srv.voice_relay.stop()
 
     def _run():
         asyncio.set_event_loop(loop)
@@ -104,7 +112,22 @@ def server_url(tmp_path):
 
     yield f"ws://127.0.0.1:{port}"
 
-    loop.call_soon_threadsafe(loop.stop)
+    # --- Teardown: signal the server coroutine to stop cleanly ---
+    async def _shutdown():
+        if shutdown is not None:
+            shutdown.set()
+
+    future = asyncio.run_coroutine_threadsafe(_shutdown(), loop)
+    try:
+        future.result(timeout=5)
+    except (TimeoutError, concurrent.futures.TimeoutError):
+        pass  # Proceed with forceful teardown even if graceful shutdown timed out
+
+    # Always join/stop the thread so a stuck server never cascades to the next test.
+    t.join(timeout=15)
+    if t.is_alive():
+        loop.call_soon_threadsafe(loop.stop)
+        t.join(timeout=2)  # Brief wait for the loop to honour the stop request
 
 
 # ---------------------------------------------------------------------------
@@ -112,14 +135,16 @@ def server_url(tmp_path):
 # ---------------------------------------------------------------------------
 
 async def _register_and_login(url, username="testuser", password="testpass"):
-    """Register + login; return (ws, token)."""
+    """Register then login in one connection; return token.
+
+    Using a single connection avoids a Windows-specific race condition where
+    a second sequential connection to the same server port can be refused
+    (WinError 1225) immediately after the first connection closes.
+    """
     async with websockets.connect(url, open_timeout=5) as ws:
-        # Register
         resp = await _send_action(ws, "register",
                                   {"username": username, "password": password})
         assert resp["success"], f"register failed: {resp}"
-    # Login in a fresh connection
-    async with websockets.connect(url, open_timeout=5) as ws:
         resp = await _send_action(ws, "login",
                                   {"username": username, "password": password})
         assert resp["success"], f"login failed: {resp}"
@@ -361,6 +386,34 @@ async def test_ban_and_unban(server_url):
         bans_resp2 = await _send_action(ws, "get_bans",
                                         {"server_id": sid, "token": token_admin})
         assert len(bans_resp2["data"]["bans"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_login_with_token(server_url):
+    """NetworkClient pattern: use a JWT token from a previous login to authenticate."""
+    token = await _register_and_login(server_url, "olivia", "pw")
+    # With empty password field (as NetworkClient sends it)
+    async with websockets.connect(server_url, open_timeout=5) as ws:
+        resp = await _send_action(ws, "login",
+                                  {"username": "olivia", "token": token, "password": ""})
+    assert resp["success"] is True
+    assert "token" in resp["data"]
+    # Without password field at all (alternative client implementation)
+    async with websockets.connect(server_url, open_timeout=5) as ws:
+        resp = await _send_action(ws, "login",
+                                  {"username": "olivia", "token": token})
+    assert resp["success"] is True
+    assert "token" in resp["data"]
+
+
+@pytest.mark.asyncio
+async def test_login_with_invalid_token_fails(server_url):
+    """Login with a bogus/expired token must be rejected with a clear error."""
+    async with websockets.connect(server_url, open_timeout=5) as ws:
+        resp = await _send_action(ws, "login",
+                                  {"username": "nobody", "token": "not.a.real.token"})
+    assert resp["success"] is False
+    assert resp["data"]["error"] == "Token expired or invalid"
 
 
 @pytest.mark.asyncio

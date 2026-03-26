@@ -155,10 +155,27 @@ def main():
                         main_win.add_message(m)
                 QTimer.singleShot(0, update)
 
+        def on_response_create_server(msg):
+            if msg.get("success"):
+                data = msg.get("data", {})
+                server_id = data.get("server_id")
+                name = data.get("name", "")
+                state["current_server_id"] = server_id
+                def _add():
+                    main_win.add_server({"id": server_id, "name": name})
+                    main_win.set_current_server(name)
+                QTimer.singleShot(0, _add)
+                # send_command is thread-safe; call it directly instead of using
+                # QTimer.singleShot with a non-zero delay, which silently fails when
+                # called from a non-QThread (QBasicTimer::start warning on Windows).
+                network.send_command("join_server", {"server_id": server_id})
+
         def on_response_login(msg):
             if msg.get("success"):
-                # Once logged in, fetch the server list
-                QTimer.singleShot(500, lambda: network.send_command("get_servers", {}))
+                # send_command is thread-safe; call it directly instead of using
+                # QTimer.singleShot with a non-zero delay, which silently fails when
+                # called from a non-QThread (QBasicTimer::start warning on Windows).
+                network.send_command("get_servers", {})
 
         # ── Register callbacks ─────────────────────────────────────────────────
 
@@ -177,6 +194,7 @@ def main():
         network.on_event["response_join_server"] = on_response_join_server
         network.on_event["response_join_channel"]= on_response_join_channel
         network.on_event["response_login"]       = on_response_login
+        network.on_event["response_create_server"] = on_response_create_server
         network.on_connected    = on_connected
         network.on_disconnected = on_disconnected
 
@@ -306,6 +324,9 @@ def main():
         audio.on_audio_captured = on_audio_captured
 
         # ── Start network connection ───────────────────────────────────────────
+        # Show the main window before connecting so the UI is fully rendered
+        # when the first server responses arrive and try to populate it.
+        main_win.show()
         network.connect(host, ws_port, voice_port, token)
 
         # ── Apply saved audio settings ─────────────────────────────────────────
@@ -318,8 +339,6 @@ def main():
         audio.set_vad_threshold(settings.get("vad_threshold", 0.01))
         audio.set_mode(settings.get("audio_mode", "vad"))
         audio.start_capture()
-
-        main_win.show()
 
     login_window.login_successful.connect(on_login_successful)
 

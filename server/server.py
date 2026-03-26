@@ -73,7 +73,34 @@ async def broadcast_to_server(server_id: int, event_type: str, data: dict, exclu
 # ---------------------------------------------------------------------------
 
 async def handle_login(client: ClientConnection, data: dict) -> bool:
-    """Authenticate a user by username/password and return a JWT token on success."""
+    """Authenticate a user by JWT token or username/password.
+
+    Token-based auth is used by the persistent NetworkClient session: the
+    client obtains a token during the initial (LoginWorker) connection and
+    then authenticates all subsequent reconnections with that token so the
+    user's password never has to be stored client-side.
+    """
+    # --- Token-based authentication (preferred for reconnection) ---
+    token_str = data.get("token", "")
+    if token_str:
+        token_data = auth.verify_token(token_str)
+        if token_data:
+            client.user_id = token_data["user_id"]
+            client.username = token_data["username"]
+            connected_clients[client.user_id] = client
+            await send_response(
+                client.websocket, "login", True,
+                {"token": token_str,
+                 "user_id": client.user_id,
+                 "username": client.username}
+            )
+            return True
+        else:
+            await send_response(client.websocket, "login", False,
+                                {"error": "Token expired or invalid"})
+            return False
+
+    # --- Username + password authentication ---
     username = data.get("username", "")
     password = data.get("password", "")
     user = database.authenticate_user(username, password)

@@ -219,7 +219,7 @@ class MainWindow(QMainWindow):
         input_layout.addWidget(self._msg_input)
 
         send_btn = QPushButton(loc.get("send"))
-        send_btn.setFixedWidth(80)
+        send_btn.setMinimumWidth(100)
         send_btn.clicked.connect(self._on_send_message)
         input_layout.addWidget(send_btn)
 

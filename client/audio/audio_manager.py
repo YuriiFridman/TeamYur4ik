@@ -17,11 +17,14 @@ except (ImportError, OSError):
     logger.warning("PyAudio not available. Audio features disabled.")
 
 # Try to import opuslib; fall back to raw PCM if not available.
-# On Windows, missing native DLLs raise OSError (not ImportError).
+# On Windows, missing native libopus may raise a generic Exception
+# (e.g. "Could not find Opus library"), not just ImportError/OSError.
+# Note: catching Exception is intentional here; KeyboardInterrupt/SystemExit
+# derive from BaseException and will still propagate normally.
 try:
     import opuslib
     OPUS_AVAILABLE = True
-except (ImportError, OSError):
+except Exception:
     OPUS_AVAILABLE = False
     logger.warning("opuslib not available. Using raw PCM audio.")
 
