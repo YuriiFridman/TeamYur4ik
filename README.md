@@ -84,6 +84,26 @@ an account and log in.
 
 ---
 
+## 🧪 Running tests
+
+```bash
+# From the repository root
+pip install -r server/requirements.txt    # installs pytest + pytest-asyncio
+python -m pytest                           # runs all 72 tests
+```
+
+Tests are located in `tests/` and cover:
+
+| Module | Test file | Tests |
+|---|---|---|
+| `server/database.py` | `test_database.py` | Registration, auth, servers, channels (create/delete/rename), messages, roles, bans, kick |
+| `server/auth.py` | `test_auth.py` | JWT creation, verification, expiry, tampering |
+| `server/voice_relay.py` | `test_voice_relay.py` | UDP relay: register, unregister, relay to peers, multi-peer, channel change |
+| `server/server.py` | `test_server_integration.py` | Full WebSocket: login, register, server/channel CRUD, messaging, roles, ban/unban, reconnection |
+| `client/` | `test_client.py` | Localization, AudioManager graceful degradation, NetworkClient state |
+
+---
+
 ## 📦 Build standalone executable
 
 ```bash
