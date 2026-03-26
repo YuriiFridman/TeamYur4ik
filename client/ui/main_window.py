@@ -33,6 +33,7 @@ class MainWindow(QMainWindow):
     send_message_requested  = pyqtSignal(str)           # message content
     join_server_requested   = pyqtSignal(int)           # server_id
     create_server_requested = pyqtSignal(str)           # server name
+    create_channel_requested = pyqtSignal(str, str)     # name, type ("text"/"voice")
     leave_channel_requested = pyqtSignal()
     mic_toggled             = pyqtSignal(bool)          # True = muted
     deafen_toggled          = pyqtSignal(bool)          # True = deafened
@@ -108,6 +109,24 @@ class MainWindow(QMainWindow):
         self._server_name_label = QLabel(loc.get("servers"))
         self._server_name_label.setObjectName("server_name_label")
         mid_layout.addWidget(self._server_name_label)
+
+        # Channel list header with "+" create button
+        ch_header = QWidget()
+        ch_header.setObjectName("ch_header")
+        ch_header_layout = QHBoxLayout(ch_header)
+        ch_header_layout.setContentsMargins(8, 4, 4, 4)
+        ch_header_layout.setSpacing(4)
+        ch_header_lbl = QLabel(loc.get("channels").upper())
+        ch_header_lbl.setObjectName("section_label")
+        ch_header_layout.addWidget(ch_header_lbl)
+        ch_header_layout.addStretch()
+        add_ch_btn = QPushButton("+")
+        add_ch_btn.setObjectName("icon_btn")
+        add_ch_btn.setFixedSize(22, 22)
+        add_ch_btn.setToolTip(loc.get("create_channel"))
+        add_ch_btn.clicked.connect(self._on_create_channel)
+        ch_header_layout.addWidget(add_ch_btn)
+        mid_layout.addWidget(ch_header)
 
         # Channel tree: two top-level categories
         self._channel_tree = QTreeWidget()
@@ -375,6 +394,21 @@ class MainWindow(QMainWindow):
                                         loc.get("server_name") + ":")
         if ok and name.strip():
             self.create_server_requested.emit(name.strip())
+
+    def _on_create_channel(self):
+        name, ok = QInputDialog.getText(self, loc.get("create_channel"),
+                                        loc.get("channel_name") + ":")
+        if not ok or not name.strip():
+            return
+        items = [loc.get("text_channel"), loc.get("voice_channel")]
+        ch_type_label, ok2 = QInputDialog.getItem(
+            self, loc.get("create_channel"),
+            loc.get("channel_type") + ":",
+            items, 0, False
+        )
+        if ok2:
+            ch_type = "text" if ch_type_label == loc.get("text_channel") else "voice"
+            self.create_channel_requested.emit(name.strip(), ch_type)
 
     def _toggle_mic(self):
         self._is_muted = not self._is_muted
