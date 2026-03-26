@@ -165,17 +165,17 @@ def main():
                     main_win.add_server({"id": server_id, "name": name})
                     main_win.set_current_server(name)
                 QTimer.singleShot(0, _add)
-                # Send join_server in the next event-loop tick after the
-                # add_server update has been processed by Qt, so that
-                # on_response_join_server can safely update the UI.
-                QTimer.singleShot(50, lambda: network.send_command(
-                    "join_server", {"server_id": server_id}
-                ))
+                # send_command is thread-safe; call it directly instead of using
+                # QTimer.singleShot with a non-zero delay, which silently fails when
+                # called from a non-QThread (QBasicTimer::start warning on Windows).
+                network.send_command("join_server", {"server_id": server_id})
 
         def on_response_login(msg):
             if msg.get("success"):
-                # Once logged in, fetch the server list
-                QTimer.singleShot(500, lambda: network.send_command("get_servers", {}))
+                # send_command is thread-safe; call it directly instead of using
+                # QTimer.singleShot with a non-zero delay, which silently fails when
+                # called from a non-QThread (QBasicTimer::start warning on Windows).
+                network.send_command("get_servers", {})
 
         # ── Register callbacks ─────────────────────────────────────────────────
 
@@ -324,6 +324,9 @@ def main():
         audio.on_audio_captured = on_audio_captured
 
         # ── Start network connection ───────────────────────────────────────────
+        # Show the main window before connecting so the UI is fully rendered
+        # when the first server responses arrive and try to populate it.
+        main_win.show()
         network.connect(host, ws_port, voice_port, token)
 
         # ── Apply saved audio settings ─────────────────────────────────────────
@@ -336,8 +339,6 @@ def main():
         audio.set_vad_threshold(settings.get("vad_threshold", 0.01))
         audio.set_mode(settings.get("audio_mode", "vad"))
         audio.start_capture()
-
-        main_win.show()
 
     login_window.login_successful.connect(on_login_successful)
 

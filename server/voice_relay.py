@@ -95,7 +95,7 @@ class VoiceRelay:
             logger.debug("VoiceRelay already started; stopping before restart")
             self.stop()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         self._transport, self._protocol = await loop.create_datagram_endpoint(
             VoiceRelayProtocol,
             local_addr=(host, port)

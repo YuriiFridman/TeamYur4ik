@@ -5,6 +5,7 @@ We spin up a real asyncio WebSocket server on a random port, connect
 one or more test clients, and assert the responses are correct.
 """
 import asyncio
+import concurrent.futures
 import json
 import os
 import sys
@@ -117,12 +118,16 @@ def server_url(tmp_path):
             shutdown.set()
 
     future = asyncio.run_coroutine_threadsafe(_shutdown(), loop)
-    future.result(timeout=5)
+    try:
+        future.result(timeout=5)
+    except (TimeoutError, concurrent.futures.TimeoutError):
+        pass  # Proceed with forceful teardown even if graceful shutdown timed out
 
-    # Wait for the server thread to finish, then stop and close the loop.
+    # Always join/stop the thread so a stuck server never cascades to the next test.
     t.join(timeout=15)
     if t.is_alive():
         loop.call_soon_threadsafe(loop.stop)
+        t.join(timeout=2)  # Brief wait for the loop to honour the stop request
 
 
 # ---------------------------------------------------------------------------
@@ -130,14 +135,16 @@ def server_url(tmp_path):
 # ---------------------------------------------------------------------------
 
 async def _register_and_login(url, username="testuser", password="testpass"):
-    """Register + login; return (ws, token)."""
+    """Register then login in one connection; return token.
+
+    Using a single connection avoids a Windows-specific race condition where
+    a second sequential connection to the same server port can be refused
+    (WinError 1225) immediately after the first connection closes.
+    """
     async with websockets.connect(url, open_timeout=5) as ws:
-        # Register
         resp = await _send_action(ws, "register",
                                   {"username": username, "password": password})
         assert resp["success"], f"register failed: {resp}"
-    # Login in a fresh connection
-    async with websockets.connect(url, open_timeout=5) as ws:
         resp = await _send_action(ws, "login",
                                   {"username": username, "password": password})
         assert resp["success"], f"login failed: {resp}"
