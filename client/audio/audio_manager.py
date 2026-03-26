@@ -1,23 +1,27 @@
 import logging
 import struct
+import sys
 import threading
 from typing import Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Try to import PyAudio; fall back gracefully if not available
+# Try to import PyAudio; fall back gracefully if not available.
+# On Windows, missing native DLLs raise OSError (not ImportError),
+# so we catch both here.
 try:
     import pyaudio
     PYAUDIO_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
     PYAUDIO_AVAILABLE = False
     logger.warning("PyAudio not available. Audio features disabled.")
 
-# Try to import opuslib; fall back to raw PCM if not available
+# Try to import opuslib; fall back to raw PCM if not available.
+# On Windows, missing native DLLs raise OSError (not ImportError).
 try:
     import opuslib
     OPUS_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
     OPUS_AVAILABLE = False
     logger.warning("opuslib not available. Using raw PCM audio.")
 
@@ -303,6 +307,16 @@ class AudioManager:
             for i in range(self._pa.get_device_count()):
                 info = self._pa.get_device_info_by_index(i)
                 name = info.get("name", f"Device {i}")
+                # Fix encoding: PyAudio on Windows returns device names in the
+                # system ANSI code page but Python may decode them as Latin-1.
+                # Re-encode to Latin-1 then decode with the preferred encoding.
+                if sys.platform == "win32":
+                    try:
+                        import locale as _locale
+                        enc = _locale.getpreferredencoding(False) or "utf-8"
+                        name = name.encode("latin-1").decode(enc, errors="replace")
+                    except (UnicodeEncodeError, UnicodeDecodeError, LookupError):
+                        pass
                 if info.get("maxInputChannels", 0) > 0:
                     result["input"].append(name)
                 if info.get("maxOutputChannels", 0) > 0:

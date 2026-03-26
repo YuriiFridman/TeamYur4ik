@@ -32,6 +32,7 @@
   "server_name": "Название сервера",
   "create_channel": "Создать канал",
   "channel_name": "Название канала",
+  "channel_type": "Тип канала",
   "private_channel": "Приватный канал",
   "channel_password": "Пароль канала",
   "error": "Ошибка",

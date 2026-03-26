@@ -32,6 +32,7 @@
   "server_name": "Server Name",
   "create_channel": "Create Channel",
   "channel_name": "Channel Name",
+  "channel_type": "Channel Type",
   "private_channel": "Private Channel",
   "channel_password": "Channel Password",
   "error": "Error",

@@ -211,7 +211,7 @@ def get_message_history(channel_id: int, limit: int = 50) -> List[Dict]:
             rows = conn.execute(
                 """SELECT m.id, m.channel_id, m.user_id, u.username, m.content, m.created_at
                    FROM messages m JOIN users u ON m.user_id = u.id
-                   WHERE m.channel_id = ? ORDER BY m.created_at DESC LIMIT ?""",
+                   WHERE m.channel_id = ? ORDER BY m.created_at DESC, m.id DESC LIMIT ?""",
                 (channel_id, limit)
             ).fetchall()
             # Reverse so oldest message appears first in the chat window
@@ -313,6 +313,19 @@ def delete_channel(channel_id: int):
             conn.commit()
     except Exception as e:
         logger.error(f"Error deleting channel: {e}")
+
+
+def rename_channel(channel_id: int, new_name: str):
+    """Rename a channel."""
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                "UPDATE channels SET name = ? WHERE id = ?",
+                (new_name, channel_id)
+            )
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Error renaming channel: {e}")
 
 
 def delete_server(server_id: int):

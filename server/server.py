@@ -354,6 +354,73 @@ async def handle_delete_server(client: ClientConnection, data: dict):
     await send_response(client.websocket, "delete_server", True, {})
 
 
+async def handle_rename_channel(client: ClientConnection, data: dict):
+    """Rename an existing channel (requires admin or moderator)."""
+    server_id = client.server_id
+    channel_id = data.get("channel_id")
+    new_name = data.get("name", "").strip()
+    if not channel_id or not new_name:
+        await send_response(client.websocket, "rename_channel", False,
+                            {"error": "channel_id and name required"})
+        return
+    role = database.get_user_role(server_id, client.user_id)
+    if role not in ("admin", "moderator"):
+        await send_response(client.websocket, "rename_channel", False,
+                            {"error": "Insufficient permissions"})
+        return
+    database.rename_channel(channel_id, new_name)
+    await broadcast_to_server(server_id, "channel_renamed",
+                               {"channel_id": channel_id, "name": new_name})
+    await send_response(client.websocket, "rename_channel", True,
+                        {"channel_id": channel_id, "name": new_name})
+
+
+async def handle_get_channels_admin(client: ClientConnection, data: dict):
+    """Return all channels for a server (admin panel use)."""
+    server_id = data.get("server_id") or client.server_id
+    if not server_id:
+        await send_response(client.websocket, "get_channels", False,
+                            {"error": "server_id required"})
+        return
+    channels = database.get_channels(server_id)
+    await send_response(client.websocket, "get_channels", True, {"channels": channels})
+
+
+async def handle_get_members(client: ClientConnection, data: dict):
+    """Return all members for a server (admin panel use)."""
+    server_id = data.get("server_id") or client.server_id
+    if not server_id:
+        await send_response(client.websocket, "get_members", False,
+                            {"error": "server_id required"})
+        return
+    members = database.get_server_members(server_id)
+    await send_response(client.websocket, "get_members", True, {"members": members})
+
+
+async def handle_get_bans(client: ClientConnection, data: dict):
+    """Return the ban list for a server (admin panel use)."""
+    server_id = data.get("server_id") or client.server_id
+    if not server_id:
+        await send_response(client.websocket, "get_bans", False,
+                            {"error": "server_id required"})
+        return
+    bans = database.get_bans(server_id)
+    await send_response(client.websocket, "get_bans", True, {"bans": bans})
+
+
+async def handle_unban_user(client: ClientConnection, data: dict):
+    """Remove a ban from server (requires admin or moderator)."""
+    server_id = client.server_id
+    target_id = data.get("user_id")
+    role = database.get_user_role(server_id, client.user_id)
+    if role not in ("admin", "moderator"):
+        await send_response(client.websocket, "unban_user", False,
+                            {"error": "Insufficient permissions"})
+        return
+    database.unban_user(server_id, target_id)
+    await send_response(client.websocket, "unban_user", True, {})
+
+
 # Map action strings to their handler coroutines
 ACTION_HANDLERS = {
     "login": handle_login,
@@ -372,7 +439,12 @@ ACTION_HANDLERS = {
     "set_role": handle_set_role,
     "create_channel": handle_create_channel,
     "delete_channel": handle_delete_channel,
+    "rename_channel": handle_rename_channel,
     "delete_server": handle_delete_server,
+    "get_channels": handle_get_channels_admin,
+    "get_members": handle_get_members,
+    "get_bans": handle_get_bans,
+    "unban_user": handle_unban_user,
 }
 
 

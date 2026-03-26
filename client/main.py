@@ -12,6 +12,7 @@ from ui.login_window import LoginWindow
 from ui.main_window import MainWindow
 from ui.settings_dialog import SettingsDialog
 from ui.styles import get_style
+from ui.admin_panel import AdminPanel
 from network.client import NetworkClient
 from audio.audio_manager import AudioManager
 from localization import loc
@@ -26,7 +27,7 @@ def load_settings() -> dict:
     """Load persisted user settings; return defaults on any failure."""
     try:
         if SETTINGS_FILE.exists():
-            with open(SETTINGS_FILE, "r") as f:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
     except Exception as e:
         logger.error(f"Failed to load settings: {e}")
@@ -228,12 +229,67 @@ def main():
         def on_set_role(user_id: int, role: str):
             network.send_command("set_role", {"user_id": user_id, "role": role})
 
+        def on_create_channel(name: str, ch_type: str):
+            server_id = state["current_server_id"]
+            if server_id:
+                network.send_command("create_channel", {
+                    "server_id": server_id,
+                    "name": name,
+                    "type": ch_type,
+                    "is_private": 0,
+                })
+
+        def on_admin_panel():
+            server_id = state["current_server_id"]
+            panel = AdminPanel(network_client=network,
+                               server_id=server_id,
+                               parent=main_win)
+
+            # Temporary response handlers scoped to this panel instance
+            def _on_get_channels(msg):
+                if msg.get("success"):
+                    chs = msg.get("data", {}).get("channels", [])
+                    QTimer.singleShot(0, lambda: panel.populate_channels(chs))
+
+            def _on_get_members(msg):
+                if msg.get("success"):
+                    mbs = msg.get("data", {}).get("members", [])
+                    QTimer.singleShot(0, lambda: panel.populate_members(mbs))
+
+            def _on_get_bans(msg):
+                if msg.get("success"):
+                    bns = msg.get("data", {}).get("bans", [])
+                    QTimer.singleShot(0, lambda: panel.populate_bans(bns))
+
+            # Save and replace callbacks
+            _saved_callbacks = {
+                k: network.on_event.get(k)
+                for k in ("response_get_channels",
+                          "response_get_members",
+                          "response_get_bans")
+            }
+            network.on_event["response_get_channels"] = _on_get_channels
+            network.on_event["response_get_members"]  = _on_get_members
+            network.on_event["response_get_bans"]     = _on_get_bans
+
+            panel.refresh()
+            panel.exec()
+
+            # Restore previous callbacks
+            for k, v in _saved_callbacks.items():
+                if v is not None:
+                    network.on_event[k] = v
+                else:
+                    network.on_event.pop(k, None)
+
         main_win.join_channel_requested.connect(on_join_channel)
         main_win.send_message_requested.connect(on_send_message)
         main_win.join_server_requested.connect(on_join_server)
         main_win.create_server_requested.connect(on_create_server)
+        main_win.create_channel_requested.connect(on_create_channel)
         main_win.disconnect_requested.connect(on_disconnect)
         main_win.settings_requested.connect(on_settings)
+        main_win.admin_panel_requested.connect(on_admin_panel)
         main_win.mic_toggled.connect(on_mic_toggled)
         main_win.kick_user_requested.connect(on_kick_user)
         main_win.ban_user_requested.connect(on_ban_user)
