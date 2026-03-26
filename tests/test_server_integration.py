@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import threading
+from typing import Optional
 import pytest
 import websockets
 
@@ -26,10 +27,6 @@ pytest_plugins = ("pytest_asyncio",)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-# How long to keep each test's server alive (seconds).
-# Must be longer than the slowest test in this module.
-_TEST_SERVER_KEEPALIVE_SECONDS = 30
 
 def _get_free_port():
     import socket
@@ -86,13 +83,23 @@ def server_url(tmp_path):
     # Run the asyncio server in a background thread
     loop = asyncio.new_event_loop()
     started = threading.Event()
+    # shutdown is assigned in _serve() before started.set(), so by the time
+    # started.wait() returns in the main thread it is guaranteed to be non-None.
+    shutdown: Optional[asyncio.Event] = None
 
     async def _serve():
-        # Start the voice relay on the patched port too
+        nonlocal shutdown
+        shutdown = asyncio.Event()
         await srv.voice_relay.start(_cfg.HOST, _cfg.VOICE_PORT)
-        async with websockets.serve(srv.handle_client, "127.0.0.1", port):
+        async with websockets.serve(srv.handle_client, "127.0.0.1", port) as ws_server:
             started.set()
-            await asyncio.sleep(_TEST_SERVER_KEEPALIVE_SECONDS)  # keep alive for the duration of the test
+            # Wait until teardown signals us to stop.
+            await shutdown.wait()
+            # Close the WebSocket server so no new connections are accepted.
+            ws_server.close()
+            await ws_server.wait_closed()
+        # Stop the UDP voice relay after WebSocket server has closed.
+        srv.voice_relay.stop()
 
     def _run():
         asyncio.set_event_loop(loop)
@@ -104,7 +111,18 @@ def server_url(tmp_path):
 
     yield f"ws://127.0.0.1:{port}"
 
-    loop.call_soon_threadsafe(loop.stop)
+    # --- Teardown: signal the server coroutine to stop cleanly ---
+    async def _shutdown():
+        if shutdown is not None:
+            shutdown.set()
+
+    future = asyncio.run_coroutine_threadsafe(_shutdown(), loop)
+    future.result(timeout=5)
+
+    # Wait for the server thread to finish, then stop and close the loop.
+    t.join(timeout=15)
+    if t.is_alive():
+        loop.call_soon_threadsafe(loop.stop)
 
 
 # ---------------------------------------------------------------------------

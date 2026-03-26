@@ -86,7 +86,15 @@ class VoiceRelay:
         self._transport: Optional[asyncio.DatagramTransport] = None
 
     async def start(self, host: str, port: int):
-        """Bind the UDP socket and start listening for voice datagrams."""
+        """Bind the UDP socket and start listening for voice datagrams.
+
+        If the relay is already running, it is stopped first so that
+        calling ``start()`` multiple times does not leak sockets.
+        """
+        if self._transport is not None and not self._transport.is_closing():
+            logger.debug("VoiceRelay already started; stopping before restart")
+            self.stop()
+
         loop = asyncio.get_event_loop()
         self._transport, self._protocol = await loop.create_datagram_endpoint(
             VoiceRelayProtocol,
@@ -95,9 +103,14 @@ class VoiceRelay:
         logger.info(f"VoiceRelay listening on UDP {host}:{port}")
 
     def stop(self):
-        """Close the UDP socket."""
-        if self._transport:
+        """Close the UDP socket and reset internal state.
+
+        Safe to call multiple times; subsequent calls are no-ops.
+        """
+        if self._transport is not None:
             self._transport.close()
+            self._transport = None
+            self._protocol = None
             logger.info("VoiceRelay stopped")
 
     def register_client(self, addr: Tuple, channel_id: int):
