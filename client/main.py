@@ -155,6 +155,23 @@ def main():
                         main_win.add_message(m)
                 QTimer.singleShot(0, update)
 
+        def on_response_create_server(msg):
+            if msg.get("success"):
+                data = msg.get("data", {})
+                server_id = data.get("server_id")
+                name = data.get("name", "")
+                state["current_server_id"] = server_id
+                def _add():
+                    main_win.add_server({"id": server_id, "name": name})
+                    main_win.set_current_server(name)
+                QTimer.singleShot(0, _add)
+                # Send join_server in the next event-loop tick after the
+                # add_server update has been processed by Qt, so that
+                # on_response_join_server can safely update the UI.
+                QTimer.singleShot(50, lambda: network.send_command(
+                    "join_server", {"server_id": server_id}
+                ))
+
         def on_response_login(msg):
             if msg.get("success"):
                 # Once logged in, fetch the server list
@@ -177,6 +194,7 @@ def main():
         network.on_event["response_join_server"] = on_response_join_server
         network.on_event["response_join_channel"]= on_response_join_channel
         network.on_event["response_login"]       = on_response_login
+        network.on_event["response_create_server"] = on_response_create_server
         network.on_connected    = on_connected
         network.on_disconnected = on_disconnected
 
