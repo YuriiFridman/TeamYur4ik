@@ -382,6 +382,34 @@ async def test_ban_and_unban(server_url):
 
 
 @pytest.mark.asyncio
+async def test_login_with_token(server_url):
+    """NetworkClient pattern: use a JWT token from a previous login to authenticate."""
+    token = await _register_and_login(server_url, "olivia", "pw")
+    # With empty password field (as NetworkClient sends it)
+    async with websockets.connect(server_url, open_timeout=5) as ws:
+        resp = await _send_action(ws, "login",
+                                  {"username": "olivia", "token": token, "password": ""})
+    assert resp["success"] is True
+    assert "token" in resp["data"]
+    # Without password field at all (alternative client implementation)
+    async with websockets.connect(server_url, open_timeout=5) as ws:
+        resp = await _send_action(ws, "login",
+                                  {"username": "olivia", "token": token})
+    assert resp["success"] is True
+    assert "token" in resp["data"]
+
+
+@pytest.mark.asyncio
+async def test_login_with_invalid_token_fails(server_url):
+    """Login with a bogus/expired token must be rejected with a clear error."""
+    async with websockets.connect(server_url, open_timeout=5) as ws:
+        resp = await _send_action(ws, "login",
+                                  {"username": "nobody", "token": "not.a.real.token"})
+    assert resp["success"] is False
+    assert resp["data"]["error"] == "Token expired or invalid"
+
+
+@pytest.mark.asyncio
 async def test_reconnection(server_url):
     """Client can disconnect and reconnect without server-side errors."""
     token = await _register_and_login(server_url, "nora", "pw")
